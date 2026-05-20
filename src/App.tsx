@@ -220,10 +220,11 @@ const getLegalMoves = (currentShogi: any, color: Color): Move[] => {
   return legalMoves;
 };
 
-const findBestDefenderMove = (currentShogi: any, maxDepth: number, aiMoveHistoryMap: Record<string, Move>): { bestMove: Move | null, steps: number, mate: boolean, mateCount?: number, timeout?: boolean } => {
+const findBestDefenderMove = (currentShogi: any, maxDepth: number, solvedAiMovesMap: Record<string, Move[]>, preferredAiMovesMap: Record<string, Move>): { bestMove: Move | null, steps: number, mate: boolean, mateCount?: number, timeout?: boolean } => {
   const memo = new Map<string, { steps: number, mate: boolean, bestMove: Move | null, mateCount?: number, timeout?: boolean }>();
   const startTime = Date.now();
   const TIME_LIMIT_MS = 3000;
+
 
   function search(depth: number, isBlack: boolean): { steps: number, mate: boolean, bestMove: Move | null, mateCount?: number, timeout?: boolean } {
     if (Date.now() - startTime > TIME_LIMIT_MS) {
@@ -240,6 +241,18 @@ const findBestDefenderMove = (currentShogi: any, maxDepth: number, aiMoveHistory
 
     const color = isBlack ? Color.Black : Color.White;
     let legalMoves = getLegalMoves(currentShogi, color);
+
+    if (!isBlack && depth === maxDepth) {
+      const prefMove = preferredAiMovesMap[sfen];
+      if (prefMove) {
+        const isLegal = legalMoves.some(m => 
+          m.from?.x === prefMove.from?.x && m.from?.y === prefMove.from?.y && m.to.x === prefMove.to.x && m.to.y === prefMove.to.y && m.piece === prefMove.piece && m.promote === prefMove.promote
+        );
+        if (isLegal) {
+          return { steps: 1, mate: false, bestMove: prefMove, mateCount: 0, timeout: false };
+        }
+      }
+    }
 
     // Sort moves to evaluate promising moves first, avoiding timeout with obscure moves
     const PIECE_VALUES: Record<string, number> = {
@@ -275,6 +288,7 @@ const findBestDefenderMove = (currentShogi: any, maxDepth: number, aiMoveHistory
             const distBefore = Math.abs(m.from.x - myKingPos.x) + Math.abs(m.from.y - myKingPos.y);
             const distAfter = Math.abs(m.to.x - myKingPos.x) + Math.abs(m.to.y - myKingPos.y);
             if (distAfter < distBefore) score += 5; // Moving closer to own king
+            if (piece.kind === 'OU') score += 15; // Give King moves higher exploration priority to avoid being starved by timeout
           } else if (piece && isBlack) {
              const distBefore = Math.abs(m.from.x - enemyKingPos.x) + Math.abs(m.from.y - enemyKingPos.y);
              const distAfter = Math.abs(m.to.x - enemyKingPos.x) + Math.abs(m.to.y - enemyKingPos.y);
@@ -287,13 +301,13 @@ const findBestDefenderMove = (currentShogi: any, maxDepth: number, aiMoveHistory
           score += dropVal;
           if (!isBlack) {
              const dist = Math.abs(m.to.x - myKingPos.x) + Math.abs(m.to.y - myKingPos.y);
-             if (dist <= 2) score += 15; // Defending near king
+             if (dist <= 2) score += 5; // Defending near king, lowered to not overshadow escaping
           } else {
              const dist = Math.abs(m.to.x - enemyKingPos.x) + Math.abs(m.to.y - enemyKingPos.y);
              if (dist <= 2) score += 15;
           }
         }
-        return score;
+        return score + Math.random() * 5; // Add randomness to ensure different move ordering across evaluations prioritizing exploration uniformly
       };
       return scoreMove(b) - scoreMove(a);
     });
@@ -431,7 +445,7 @@ const findBestDefenderMove = (currentShogi: any, maxDepth: number, aiMoveHistory
       }
 
       const sfenKey = currentShogi.toSFENString(1);
-      const previousMove = aiMoveHistoryMap[sfenKey];
+      const previousMoves = solvedAiMovesMap[sfenKey] || [];
 
       const PIECE_VALUES: Record<string, number> = {
         FU: 1, KY: 3, KE: 4, GI: 6, KI: 7, KA: 10, HI: 12,
@@ -453,24 +467,16 @@ const findBestDefenderMove = (currentShogi: any, maxDepth: number, aiMoveHistory
          if (m.from) {
              const captured = currentShogi.get(m.to.x, m.to.y);
              if (captured) {
-                score += (PIECE_VALUES[captured.kind] || 1) * 20;
+                score += (PIECE_VALUES[captured.kind] || 1) * 20; // Captures are still strictly good to prioritize
              }
-             const p = currentShogi.get(m.from.x, m.from.y);
-             if (p && ['KI', 'GI', 'FU', 'KA', 'HI'].includes(p.kind)) {
-                 const distBefore = Math.abs(m.from.x - goteKingPos.x) + Math.abs(m.from.y - goteKingPos.y);
-                 const distAfter = Math.abs(m.to.x - goteKingPos.x) + Math.abs(m.to.y - goteKingPos.y);
-                 if (distAfter < distBefore) score += 15;
-             }
-             if (p && p.kind === 'OU') score += 10; // slightly prefer king moving away from danger
-         } else {
-             score -= 10; // Penalty for dropping a piece
-             const dist = Math.abs(m.to.x - goteKingPos.x) + Math.abs(m.to.y - goteKingPos.y);
-             if (dist <= 2) score += 30; // Strongly prefer dropping near King
          }
-         // Prevent repeating the same move immediately
-         if (previousMove && m.from?.x === previousMove.from?.x && m.from?.y === previousMove.from?.y && m.to.x === previousMove.to.x && m.to.y === previousMove.to.y && m.piece === previousMove.piece && m.promote === previousMove.promote) {
-           score -= 100;
-         }
+         
+         // Only penalize used moves to ensure variation
+         const usedCount = previousMoves.filter(pm => 
+           m.from?.x === pm.from?.x && m.from?.y === pm.from?.y && m.to.x === pm.to.x && m.to.y === pm.to.y && m.piece === pm.piece && m.promote === pm.promote
+         ).length;
+         score -= usedCount * 1000;
+
          return score + Math.random();
       };
 
@@ -587,7 +593,8 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [pendingPromotionMove, setPendingPromotionMove] = useState<Move | null>(null);
   const [sfenHistory, setSfenHistory] = useState<string[]>([]);
-  const [aiMoveHistoryMap, setAiMoveHistoryMap] = useState<Record<string, Move>>({});
+  const [solvedAiMovesMap, setSolvedAiMovesMap] = useState<Record<string, Move[]>>({});
+  const [preferredAiMovesMap, setPreferredAiMovesMap] = useState<Record<string, Move>>({});
   const [solvedProblems, setSolvedProblems] = useState<number[]>([]);
   
   const [isUploading, setIsUploading] = useState(false);
@@ -997,6 +1004,8 @@ SFEN形式の例: 7nl/1R3sk2/5pppp/9/9/9/9/9/9 b GS 1
         setAlertDialog(`問題「${currentProblem.title}」の盤面データが不正なため、空の盤面を表示しています。「盤面を修正」から修正してください。`);
       }
       
+      fillGoteHand(newShogi);
+      
       setShogi(newShogi);
       setSelectedSquare(null);
       setSelectedHandPiece(null);
@@ -1260,7 +1269,16 @@ SFEN形式の例: 7nl/1R3sk2/5pppp/9/9/9/9/9/9 b GS 1
         setMessage('指す手がありません。失敗です。');
       } else {
         setMessage('CORRECT');
+        setPreferredAiMovesMap({});
         setSolvedProblems(prev => Array.from(new Set([...prev, currentProblem.id])));
+        setSolvedAiMovesMap(prev => {
+          const newMap = { ...prev };
+          for (let i = 1; i < moveHistory.length; i += 2) {
+            const sfen = sfenHistory[i];
+            if (sfen) newMap[sfen] = [...(newMap[sfen] || []), moveHistory[i]];
+          }
+          return newMap;
+        });
         setShowCorrectSplash(true);
         setTimeout(() => setShowCorrectSplash(false), 1000);
         confetti({
@@ -1273,6 +1291,7 @@ SFEN形式の例: 7nl/1R3sk2/5pppp/9/9/9/9/9/9 b GS 1
     }
 
     if (isGoteManualEntry) {
+       setPreferredAiMovesMap(prev => ({ ...prev, [sfenBefore]: move }));
        setIsGoteManualEntry(false);
        setMessage('あなたの番です。');
        return;
@@ -1282,10 +1301,9 @@ SFEN形式の例: 7nl/1R3sk2/5pppp/9/9/9/9/9/9 b GS 1
     
     setTimeout(() => {
       const sfenKey = nextShogi.toSFENString(1);
-      const defenderRes = findBestDefenderMove(nextShogi, 3, aiMoveHistoryMap);
+      const defenderRes = findBestDefenderMove(nextShogi, 3, solvedAiMovesMap, preferredAiMovesMap);
       
       if (defenderRes.bestMove) {
-        setAiMoveHistoryMap(prev => ({ ...prev, [sfenKey]: defenderRes.bestMove! }));
         applyMoveToShogi(nextShogi, defenderRes.bestMove);
         const afterGoteSfen = nextShogi.toSFENString(1);
         setSfenHistory(prev => [...prev, afterGoteSfen]);
@@ -1302,7 +1320,16 @@ SFEN形式の例: 7nl/1R3sk2/5pppp/9/9/9/9/9/9 b GS 1
       } else {
         setIsGameOver(true);
         setMessage('CORRECT');
+        setPreferredAiMovesMap({});
         setSolvedProblems(prev => Array.from(new Set([...prev, currentProblem.id])));
+        setSolvedAiMovesMap(prev => {
+          const newMap = { ...prev };
+          for (let i = 1; i < moveHistory.length; i += 2) {
+            const sfen = sfenHistory[i];
+            if (sfen) newMap[sfen] = [...(newMap[sfen] || []), moveHistory[i]];
+          }
+          return newMap;
+        });
         setShowCorrectSplash(true);
         setTimeout(() => setShowCorrectSplash(false), 1000);
         confetti({
