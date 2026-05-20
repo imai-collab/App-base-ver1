@@ -588,6 +588,7 @@ export default function App() {
   const [pendingPromotionMove, setPendingPromotionMove] = useState<Move | null>(null);
   const [sfenHistory, setSfenHistory] = useState<string[]>([]);
   const [aiMoveHistoryMap, setAiMoveHistoryMap] = useState<Record<string, Move>>({});
+  const [solvedProblems, setSolvedProblems] = useState<number[]>([]);
   
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -1014,7 +1015,7 @@ SFEN形式の例: 7nl/1R3sk2/5pppp/9/9/9/9/9/9 b GS 1
 
   const handleChangeGoteMove = useCallback(() => {
     if (moveHistory.length === 0) return;
-    const isSentesTurn = moveHistory.length % 2 !== 0;
+    const isSentesTurn = moveHistory.length % 2 === 0;
     
     if (!isSentesTurn) return;
 
@@ -1259,6 +1260,7 @@ SFEN形式の例: 7nl/1R3sk2/5pppp/9/9/9/9/9/9 b GS 1
         setMessage('指す手がありません。失敗です。');
       } else {
         setMessage('CORRECT');
+        setSolvedProblems(prev => Array.from(new Set([...prev, currentProblem.id])));
         setShowCorrectSplash(true);
         setTimeout(() => setShowCorrectSplash(false), 1000);
         confetti({
@@ -1300,6 +1302,7 @@ SFEN形式の例: 7nl/1R3sk2/5pppp/9/9/9/9/9/9 b GS 1
       } else {
         setIsGameOver(true);
         setMessage('CORRECT');
+        setSolvedProblems(prev => Array.from(new Set([...prev, currentProblem.id])));
         setShowCorrectSplash(true);
         setTimeout(() => setShowCorrectSplash(false), 1000);
         confetti({
@@ -1463,7 +1466,7 @@ SFEN形式の例: 7nl/1R3sk2/5pppp/9/9/9/9/9/9 b GS 1
       )}
 
       <div className="w-full bg-amber-200 py-2 px-4 flex justify-center items-center border-b-2 border-amber-900/20 shrink-0 shadow-sm">
-        <span className="text-amber-950 font-black text-base sm:text-lg tracking-wide">©kiryoアプリ　詰将棋</span>
+        <span className="text-amber-950 font-black text-base sm:text-lg tracking-wide">©kiryoアプリ　{appTitle}</span>
       </div>
       <header className="w-full flex-none px-2 sm:px-4 py-2 flex items-center justify-between shadow-sm z-10 bg-white/50 backdrop-blur-sm border-b border-amber-900/10">
         <button
@@ -1487,7 +1490,7 @@ SFEN形式の例: 7nl/1R3sk2/5pppp/9/9/9/9/9/9 b GS 1
           
           <div className="flex justify-center items-center gap-2 sm:gap-4 mx-1 sm:mx-2">
             <h2 className="text-base sm:text-lg md:text-xl font-bold text-amber-900 whitespace-nowrap">
-              {currentProblem.title}
+              {solvedProblems.includes(currentProblem.id) ? '🔴 ' : ''}{currentProblem.title}
             </h2>
             <span className="font-bold px-3 py-1 bg-amber-200 rounded-full text-xs sm:text-sm whitespace-nowrap text-amber-900">
               問題 {currentProblemIndex + 1} / {problems.length}
@@ -1600,8 +1603,8 @@ SFEN形式の例: 7nl/1R3sk2/5pppp/9/9/9/9/9/9 b GS 1
               </button>
               <button
                 onClick={handleChangeGoteMove}
-                disabled={moveHistory.length === 0 || moveHistory.length % 2 === 0}
-                className={`flex-1 flex items-center justify-center bg-gray-600 text-white py-1.5 sm:py-3 rounded-lg sm:rounded-xl font-bold text-xs sm:text-base transition-colors shadow-sm active:scale-95 ${moveHistory.length === 0 || moveHistory.length % 2 === 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-700'}`}
+                disabled={moveHistory.length === 0 || moveHistory.length % 2 !== 0}
+                className={`flex-1 flex items-center justify-center bg-gray-600 text-white py-1.5 sm:py-3 rounded-lg sm:rounded-xl font-bold text-xs sm:text-base transition-colors shadow-sm active:scale-95 ${moveHistory.length === 0 || moveHistory.length % 2 !== 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-700'}`}
               >
                 後手の手を変える
               </button>
