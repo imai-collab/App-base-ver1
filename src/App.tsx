@@ -1004,8 +1004,6 @@ SFEN形式の例: 7nl/1R3sk2/5pppp/9/9/9/9/9/9 b GS 1
         setAlertDialog(`問題「${currentProblem.title}」の盤面データが不正なため、空の盤面を表示しています。「盤面を修正」から修正してください。`);
       }
       
-      fillGoteHand(newShogi);
-      
       setShogi(newShogi);
       setSelectedSquare(null);
       setSelectedHandPiece(null);
